@@ -1,0 +1,15 @@
+{
+  "name": "raintank-workers",
+  "version": "0.0.1",
+  "private": true,
+  "dependencies": {
+    "async": "*",
+    "cluster": "*",
+    "request": "*",
+    "lodash": "*",
+    "string-hash": "*",
+    "socket.io": "*",
+    "node-zookeeper-client": "*",
+    "kafka-node": "*"
+  }
+}
