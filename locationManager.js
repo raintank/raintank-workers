@@ -159,7 +159,7 @@ if (cluster.isMaster) {
                 }
                 var filter = {
                     deletedAt: {$exists: false},
-                    locations: location.name,
+                    locations: location._id,
                 }
                 schema.services.model.find(filter).lean().exec(function(err, services){
                     socket.emit('refresh', JSON.stringify(services));
