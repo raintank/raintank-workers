@@ -82,7 +82,8 @@ if (cluster.isMaster) {
         //TODO: handle real user authentication so clients can deploy their own
         // collector nodes.
         if ('token' in req.query && req.query.token == config.adminToken) {
-            socket.request.user = '531307ac1133a83d285b05a1';
+            socket.request.user = '531307ac1133a83d285b05a2';
+            socket.request.account = '531307ac1133a83d285b05a1';
             socket.request.locationCode = req.query.location;
             next();
         } else {
@@ -134,12 +135,36 @@ if (cluster.isMaster) {
                 RECV = RECV + count;
             });
         });
-        var filter = {
-            deletedAt: {$exists: false},
-            locations: socket.request.locationCode,
-        }
-        schema.services.model.find(filter).lean().exec(function(err, services){
-            socket.emit('refresh', JSON.stringify(services));
+        socket.on('register', function(data) {
+            console.log("register called.");
+            schema.locations.model.findOne({_id: data.id}).exec(function(err, location) {
+                if (err) {
+                    console.log("error looking up location");
+                    console.log(err);
+                    return;
+                }
+                console.log(location);
+                if (!location) {
+                    console.log('location not in DB.');
+                    data._id = data.id;
+                    data.account = socket.request.account;
+                    location = new schema.locations.model(data);
+                    location.save(function(err) {
+                        if (err) {
+                            console.log("error saving location.");
+                            console.log(err);
+                        }
+                        console.log("saved location to DB.");
+                    });
+                }
+                var filter = {
+                    deletedAt: {$exists: false},
+                    locations: location.name,
+                }
+                schema.services.model.find(filter).lean().exec(function(err, services){
+                    socket.emit('refresh', JSON.stringify(services));
+                });
+            });
         });
     });
 
