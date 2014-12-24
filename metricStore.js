@@ -1,14 +1,14 @@
 'use strict';
-
+var config = require('./config').config;
 var schema = require('raintank-core/schema');
 var util = require('util');
-var config = require('raintank-core/config');
 var carbon = require('raintank-core/lib/carbon');
 var kafka = require('kafka-node');
 var HighLevelConsumer = kafka.HighLevelConsumer;
 var producer = require('raintank-core/lib/kafka').producer;
 var cluster = require('cluster');
-var numCPUs = require('os').cpus().length;
+
+var numCPUs = config.numCPUs;
 
 var running = false;
 var client;

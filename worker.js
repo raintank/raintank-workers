@@ -1,11 +1,10 @@
 'use strict';
 
+var config = require('./config').config;
 var schema = require('raintank-core/schema');
 var util = require('util');
 var serviceTypes = require('raintank-core/serviceTypes');
-var ccontinousQueryTypes = require('raintank-core/queryTypes');
-var config = require('raintank-core/config');
-
+var continousQueryTypes = require('raintank-core/queryTypes');
 var kafka = require('kafka-node');
 var HighLevelConsumer = kafka.HighLevelConsumer;
 

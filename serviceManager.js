@@ -1,8 +1,8 @@
 'use strict';
 
+var config = require('./config').config;
 var schema = require('raintank-core/schema');
 var util = require('util');
-var config = require('raintank-core/config');
 var carbon = require('raintank-core/lib/carbon');
 var kafka = require('kafka-node');
 var Consumer = kafka.Consumer;
@@ -10,7 +10,7 @@ var Offset = kafka.Offset;
 var producer = require('raintank-core/lib/kafka').producer;
 var hashCode = require('string-hash');
 var async = require('async');
-var numCPUs = require('os').cpus().length;
+var numCPUs = config.numCPUs;
 var http = require('http');
 var cluster = require('cluster');
 var url = require('url');

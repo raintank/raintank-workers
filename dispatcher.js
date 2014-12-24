@@ -1,7 +1,7 @@
 'use strict;'
+var config = require('./config').config;
 var util = require('util');
 var schema = require('raintank-core/schema');
-var config = require('raintank-core/config');
 var zookeeper = require('node-zookeeper-client');
 var producer = require('raintank-core/lib/kafka').producer;
 

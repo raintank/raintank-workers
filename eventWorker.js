@@ -1,8 +1,7 @@
 'use strict';
-
+var config = require('./config').config;
 var schema = require('raintank-core/schema');
 var util = require('util');
-var config = require('raintank-core/config');
 var kafka = require('kafka-node');
 var HighLevelConsumer = kafka.HighLevelConsumer;
 
