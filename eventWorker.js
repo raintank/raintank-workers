@@ -4,11 +4,14 @@ var schema = require('raintank-core/schema');
 var util = require('util');
 var kafka = require('kafka-node');
 var HighLevelConsumer = kafka.HighLevelConsumer;
+var cluster = require('cluster');
+
+var numCPUs = config.numCPUs;
 
 var running = false;
 var client;
 function init() {
-
+    console.log("initializing");
     client = new kafka.Client(config.kafka.connectionString, 'eventWorker', {sessionTimeout: 1500});
     running = true;
     var consumer = new HighLevelConsumer(
@@ -30,14 +33,9 @@ function init() {
         if (running) {
             console.log('closing client');
             client.close();
-            running = false;
-            setTimeout(function() {
-                console.log("Restarting worker");
-                init();
-            },2500);
-        } else {
-            console.log("client already closed.")
         }
+        console.log("exiting");
+        process.exit(1);
     });
 
     consumer.on('message', function (message) {
@@ -96,4 +94,15 @@ process.on( "SIGINT", function() {
     process.exit();
 });
 
-init();
+if (cluster.isMaster) {
+    // Fork workers.
+    for (var i = 0; i < numCPUs; i++) {
+        cluster.fork();
+    }
+    cluster.on('exit', function(worker, code, signal) {
+        console.log('worker ' + worker.process.pid + ' died');
+        cluster.fork();
+    });
+} else {
+    init();
+}
