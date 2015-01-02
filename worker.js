@@ -5,47 +5,21 @@ var schema = require('raintank-core/schema');
 var util = require('util');
 var serviceTypes = require('raintank-core/serviceTypes');
 var continousQueryTypes = require('raintank-core/queryTypes');
-var kafka = require('kafka-node');
-var HighLevelConsumer = kafka.HighLevelConsumer;
+var queue = require('raintank-queue');
+var consumer = new queue.Consumer({
+    mgmtUrl: config.queue.mgmtUrl
+});
 
 var running = false;
 var client;
 
 function init() {
-
-    client = new kafka.Client(config.kafka.connectionString, 'taskWorker', {sessionTimeout: 1500});
-    running = true;
-    var consumer = new HighLevelConsumer(
-        client,
-        [
-            { topic: 'tasks'}
-        ],
-        {
-            groupId: "taskWorker",
-            autoCommitIntervalMs: 1000,
-            // The maximum bytes to include in the message set for this partition. This helps bound the size of the response.
-            fetchMaxBytes: 1024 * 10, 
-        }
-    );
-    consumer.on('error', function(err) {
-        console.log('consumer emiited error.');
-        console.log(err);
-        if (running) {
-            console.log('closing client');
-            client.close();
-            running = false;
-            setTimeout(function() {
-                console.log("Restarting worker");
-                init();
-            },2500);
-        } else {
-            console.log("client already closed.")
-        }
+    consumer.on('connect', function() {
+        consumer.join('tasks', 'taskWorker');
     });
 
-    consumer.on('message', function (message) {
-        console.log(message);
-        var ts = JSON.parse(message.value);
+    consumer.on('message', function (topic, partition, message) {
+        var ts = message
         console.log(ts);
         if (!(ts._id)) {
             console.log("invalid msg content.");
@@ -85,7 +59,6 @@ function init() {
 
 process.on( "SIGINT", function() {
     console.log('CLOSING [SIGINT]');
-    client.close();
     process.exit();
 });
 

@@ -2,8 +2,10 @@
 var config = require('./config').config;
 var schema = require('raintank-core/schema');
 var util = require('util');
-var kafka = require('kafka-node');
-var HighLevelConsumer = kafka.HighLevelConsumer;
+var queue = require('raintank-queue');
+var consumer = new queue.Consumer({
+    mgmtUrl: config.queue.mgmtUrl
+});
 var cluster = require('cluster');
 
 var numCPUs = config.numCPUs;
@@ -12,44 +14,21 @@ var running = false;
 var client;
 function init() {
     console.log("initializing");
-    client = new kafka.Client(config.kafka.connectionString, 'eventWorker', {sessionTimeout: 1500});
-    running = true;
-    var consumer = new HighLevelConsumer(
-        client,
-        [
-            { topic: 'serviceEvents'},
-            { topic: 'metricEvents'}
-        ],
-        {
-            groupId: "EventWorker",
-            autoCommitIntervalMs: 1000,
-            // The maximum bytes to include in the message set for this partition. This helps bound the size of the response.
-            fetchMaxBytes: 1024 * 10, 
-        }
-    );
-    consumer.on('error', function(err) {
-        console.log('consumer emiited error.');
-        console.log(err);
-        if (running) {
-            console.log('closing client');
-            client.close();
-        }
-        console.log("exiting");
-        process.exit(1);
+    consumer.on('connect', function() {
+        consumer.join('serviceEvents', 'eventWorker');
+        consumer.join('metricEvents', 'eventWorker');
     });
 
-    consumer.on('message', function (message) {
-
-        if (message.topic == "serviceEvents") {
+    consumer.on('message', function (topic, partition, message) {
+        if (topic == "serviceEvents") {
             serviceEvent(message);
-        } else if (message.topic == "metricEvents") {
+        } else if (topic == "metricEvents") {
             metricEvent(message);
         }
     });
 }
 
-function serviceEvent(message) {
-    var serviceEvent = JSON.parse(message.value);
+function serviceEvent(serviceEvent) {
     console.log('processing serviceEvent.');
     var obj = new schema.serviceEvents.model(serviceEvent);
     obj.save(function(err) {
@@ -64,8 +43,7 @@ function serviceEvent(message) {
     //TODO: handle Actions via ElasticSearch Percolate.
 };
 
-function metricEvent(message) {
-    var metricEvent = JSON.parse(message.value);
+function metricEvent(metricEvent) {
     if (metricEvent.type == 'keepAlive') {
         //ignore keepalives that are older then 2minute2.
         if (metricEvent.timestamp > (new Date().getTime() - 120000)) {
@@ -90,7 +68,6 @@ function metricEvent(message) {
 
 process.on( "SIGINT", function() {
     console.log('CLOSING [SIGINT]');
-    client.close();
     process.exit();
 });
 

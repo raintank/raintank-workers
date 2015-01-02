@@ -3,11 +3,12 @@
 var config = require('./config').config;
 var schema = require('raintank-core/schema');
 var util = require('util');
+var queue = require('raintank-queue');
 var carbon = require('raintank-core/lib/carbon');
-var kafka = require('kafka-node');
-var Consumer = kafka.Consumer;
-var Offset = kafka.Offset;
-var producer = require('raintank-core/lib/kafka').producer;
+var consumer = new queue.Consumer({
+    mgmtUrl: config.queue.mgmtUrl
+});
+var producer = queue.Publisher;
 var hashCode = require('string-hash');
 var async = require('async');
 var numCPUs = config.numCPUs;
@@ -15,6 +16,11 @@ var http = require('http');
 var cluster = require('cluster');
 var url = require('url');
 var zlib = require('zlib');
+
+producer.init({
+    publisherSocketAddr: config.queue.publisherSocketAddr,
+    partitions: config.queue.partitions,
+});
 
 function handler (req, res) {
   res.writeHead(404);
@@ -38,7 +44,6 @@ if (cluster.isMaster) {
 
 
     var RECV = 0;
-    var PUB = 0;
     var BUFFER = {};
 
     setInterval(function() {
@@ -49,7 +54,7 @@ if (cluster.isMaster) {
         for (var id in messages) {
             kafkaPayload.push( {
                 topic: "metrics",
-                messages: messages[id],
+                payload: messages[id],
                 partition: id
             });
             count = count + messages[id].length;
@@ -57,23 +62,14 @@ if (cluster.isMaster) {
         if (kafkaPayload.length < 1) {
             return;
         }
-        producer.send(kafkaPayload, function(err, resp) {
-            if (err) {
-                console.log("error sending serviceEvent to Kafka.");
-                console.log(err);
-                return;
-            }
-            PUB = PUB + count;
-        });
+        producer.batch(kafkaPayload);
     }, 100);
         
 
     setInterval(function() {
         var recv = RECV;
         RECV=0;
-        var pub = PUB;
-        PUB = 0;
-        console.log("RECV:%s, PUB:%s metrics per sec", recv/10, pub/10);
+        console.log("RECV:%s metrics per sec", recv/10);
     }, 10000);
 
 
@@ -104,14 +100,7 @@ if (cluster.isMaster) {
                     return;
                 }
                 var payload = buffer.toString();
-                producer.send([{topic: 'serviceEvents', messages: [payload]}], function(err, resp) {
-                    if (err) {
-                        console.log("error sending serviceEvent to Kafka.");
-                        console.log(err);
-                    } else {
-                        console.log('events submitted successfully to kafka.');
-                    }
-                });
+                producer.send('serviceEvents', [payload]);
             });
         });
 
@@ -191,80 +180,16 @@ if (cluster.isMaster) {
     var running = false;
     var client;
     var init = function() {
-        client = new kafka.Client(config.kafka.connectionString, 'serviceChange', {sessionTimeout: 1500});
-        running = true;
-        var topics = [];
-        var i =0;
-        while (i < config.kafka.partitions) {
-            topics.push({topic: "serviceChange", partition: i});
-            i++;
-        }
-        console.log(topics);
-        var offset = new Offset(client);
-        var payload = [];
-        topics.forEach(function(topic) {
-            payload.push({
-                topic: topic.topic,
-                partition: topic.partition,
-                time: -1,
-            });
+        consumer.on('connect', function() {
+            consumer.join('serviceChange', 'locationManager:'+process.pid);
         });
-
-        var steps = [];
-        payload.forEach(function(p) {
-            steps.push(function(cb) {
-                offset.fetch([p], function(err, data) {
-                    var topic = {
-                        topic: p.topic,
-                        partiton: p.partition,
-                        offset: 0
-                    };
-                    if (err) {
-                        console.log("Error when fetching topic offset.");
-                        console.log(err);
-                    } else {
-                        console.log("got offset %j", data);
-                        topic.offset = data[p.topic][p.partition];
-                    }
-                    cb(null, topic);
-                });
-            });
-        });
-        async.parallel(steps, function(err, topics) {
-            console.log("TOPICS: %j", topics);
-            var consumer = new Consumer(
-                client,
-                topics,
-                {
-                    groupId: "serviceChange-"+process.pid,
-                    autoCommitIntervalMs: 1000,
-                    // The maximum bytes to include in the message set for this partition. This helps bound the size of the response.
-                    fetchMaxBytes: 1024 * 10,
-                    fromOffset: true,
-                }
-            );
-            consumer.on('error', function(err) {
-                console.log('consumer emited error.');
-                console.log(err);
-                if (running) {
-                    console.log('closing client');
-                    client.close();
-                    running = false;
-                    setTimeout(function() {
-                        console.log("Restarting worker");
-                        init();
-                    },2500);
-                } else {
-                    console.log("client already closed.")
-                }
-            });
-            consumer.on('message', function (message) {
-                var payload = JSON.parse(message.value);
-                var action = payload.action;
+        consumer.on('message', function (topic, partition, message) {
+            message.forEach(function(msg) {
+                var action = msg.action;
                 console.log("got new message.");
-                console.log(message.value);
-                payload.service.locations.forEach(function(loc) {
-                    io.to(loc).emit(action, JSON.stringify(payload.service));
+                console.log(msg);
+                msg.service.locations.forEach(function(loc) {
+                    io.to(loc).emit(action, JSON.stringify(msg.service));
                 });
             });
         });

@@ -3,51 +3,37 @@ var config = require('./config').config;
 var schema = require('raintank-core/schema');
 var util = require('util');
 var carbon = require('raintank-core/lib/carbon');
-var kafka = require('kafka-node');
-var HighLevelConsumer = kafka.HighLevelConsumer;
-var producer = require('raintank-core/lib/kafka').producer;
+var queue = require('raintank-queue');
+var producer = queue.Publisher;
 var cluster = require('cluster');
+var consumer = new queue.Consumer({
+    mgmtUrl: config.queue.mgmtUrl
+});
+producer.init({
+    publisherSocketAddr: config.queue.publisherSocketAddr,
+    partitions: config.queue.partitions,
+});
 
 var numCPUs = config.numCPUs;
-
-var running = false;
-var client;
-
 
 var metricDef = {};
 
 function init() {
     console.log("initializing");
-    client = new kafka.Client(config.kafka.connectionString, 'metricStore', {sessionTimeout: 1500});
-    running = true;
-    var consumer = new HighLevelConsumer(
-        client,
-        [
-            { topic: 'metrics'},
-            { topic: 'metricDefChange'}
-        ],
-        {
-            groupId: "metricStore",
-            autoCommitIntervalMs: 1000,
-            // The maximum bytes to include in the message set for this partition. This helps bound the size of the response.
-            fetchMaxBytes: 1024 * 10, 
-        }
-    );
-    consumer.on('error', function(err) {
-        console.log('consumer emiited error.');
-        console.log(err);
-        if (running) {
-            console.log('closing client');
-            client.close();
-        }
-        console.log("exiting");
-        process.exit(1);
+    consumer.on('connect', function() {
+        consumer.join('metrics', 'metricStore');
+        consumer.join('metricDefChange', 'metricStore');
     });
-    consumer.on('message', function (message) {
-        if (message.topic == "metrics") {
-            processMetric(message);
-        } else if (message.topic == "metricDefChange") {
-            processMetricDefEvent(message);
+
+    consumer.on('message', function (topic, partition, message) {
+        if (topic == "metrics") {
+            message.forEach(function(msg) {
+                processMetric(msg);
+            });
+        } else if (topic == "metricDefChange") {
+            message.forEach(function(msg) {
+                processMetricDefEvent(msg);
+            });
         }
     });
     // every 15minutes, delete any stale metricDefs from the cache.
@@ -62,16 +48,13 @@ function init() {
     }, 900000);
 }
 
-
-
 var buffer = {
     lastFlush: new Date().getTime(),
     metrics: [],
 }
 
 
-function processMetricDefEvent(message) {
-    var payload = JSON.parse(message.value);
+function processMetricDefEvent(payload) {
     if (payload.action == 'update') {
         updateMetricDef(payload.metric);
     } else if (payload.action == 'remove') {
@@ -116,8 +99,7 @@ function removeMetricDef(metric) {
     delete metricDef[metric._id];
 };
 
-function processMetric(message) {
-    var metric = JSON.parse(message.value);
+function processMetric(metric) {
     metric._id = util.format('%s.%s', metric.account, metric.name);
     //console.log("processing metric %s", metric._id);
     if (!(metric._id in metricDef)) {
@@ -468,20 +450,12 @@ function checkThresholds(metric) {
 
     if (events.length > 0 ) {
         var messages = [];
-        events.forEach(function(event) {
-            messages.push(JSON.stringify(event));
-        });
-        producer.send([{topic: 'metricEvents', messages: messages}], function(err, data) {
-            if (err) {
-                console.log(err);
-            }
-        }); 
+        producer.send('metricEvents', partition, [events]);
     }
 }
 
 process.on( "SIGINT", function() {
     console.log('CLOSING [SIGINT]');
-    client.close();
     process.exit();
 });
 

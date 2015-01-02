@@ -4,13 +4,12 @@
   "private": true,
   "dependencies": {
     "raintank-core": "raintank/raintank-core",
+    "raintank-queue": "raintank/raintank-queue",
     "async": "*",
     "cluster": "*",
     "request": "*",
     "lodash": "*",
     "string-hash": "*",
-    "socket.io": "*",
-    "node-zookeeper-client": "*",
-    "kafka-node": "*"
+    "socket.io": "*"
   }
 }
