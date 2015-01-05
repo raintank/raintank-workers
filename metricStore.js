@@ -7,7 +7,8 @@ var queue = require('raintank-queue');
 var producer = queue.Publisher;
 var cluster = require('cluster');
 var consumer = new queue.Consumer({
-    mgmtUrl: config.queue.mgmtUrl
+    mgmtUrl: config.queue.mgmtUrl,
+    consumerSocketAddr: config.queue.consumerSocketAddr
 });
 producer.init({
     publisherSocketAddr: config.queue.publisherSocketAddr,

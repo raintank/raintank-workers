@@ -4,7 +4,8 @@ var util = require('util');
 var schema = require('raintank-core/schema');
 var queue = require('raintank-queue');
 var consumer = new queue.Consumer({
-    mgmtUrl: config.queue.mgmtUrl
+    mgmtUrl: config.queue.mgmtUrl,
+    consumerSocketAddr: config.queue.consumerSocketAddr
 });
 var producer = queue.Publisher;
 producer.init({

@@ -4,7 +4,8 @@ var schema = require('raintank-core/schema');
 var util = require('util');
 var queue = require('raintank-queue');
 var consumer = new queue.Consumer({
-    mgmtUrl: config.queue.mgmtUrl
+    mgmtUrl: config.queue.mgmtUrl,
+    consumerSocketAddr: config.queue.consumerSocketAddr
 });
 var cluster = require('cluster');
 

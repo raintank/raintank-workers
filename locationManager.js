@@ -6,7 +6,8 @@ var util = require('util');
 var queue = require('raintank-queue');
 var carbon = require('raintank-core/lib/carbon');
 var consumer = new queue.Consumer({
-    mgmtUrl: config.queue.mgmtUrl
+    mgmtUrl: config.queue.mgmtUrl,
+    consumerSocketAddr: config.queue.consumerSocketAddr
 });
 var producer = queue.Publisher;
 var hashCode = require('string-hash');
@@ -39,10 +40,7 @@ if (cluster.isMaster) {
 } else {
     var app = http.createServer(handler)
     var io = require('socket.io')(app);
-
     app.listen(process.env.PORT || 8181);
-
-
     var RECV = 0;
     var BUFFER = {};
 
@@ -50,19 +48,19 @@ if (cluster.isMaster) {
         var messages = BUFFER;
         BUFFER = {};
         var count = 0;
-        var kafkaPayload = [];
+        var msgPayload = [];
         for (var id in messages) {
-            kafkaPayload.push( {
+            msgPayload.push( {
                 topic: "metrics",
                 payload: messages[id],
                 partition: id
             });
             count = count + messages[id].length;
         }
-        if (kafkaPayload.length < 1) {
+        if (msgPayload.length < 1) {
             return;
         }
-        producer.batch(kafkaPayload);
+        producer.batch(msgPayload);
     }, 100);
         
 
@@ -115,11 +113,11 @@ if (cluster.isMaster) {
                 var count =0;
                 payload.forEach(function(metric) {
                     count++;
-                    var partition = hashCode(metric.name) % config.kafka.partitions;
+                    var partition = hashCode(metric.name) % config.queue.partitions;
                     if (!(partition in BUFFER)) {
                         BUFFER[partition] = [];
                     }
-                    BUFFER[partition].push(JSON.stringify(metric));
+                    BUFFER[partition].push(metric);
                 });
                 RECV = RECV + count;
             });
