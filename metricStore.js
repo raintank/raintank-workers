@@ -1,52 +1,60 @@
 'use strict';
 var config = require('./config').config;
-var schema = require('raintank-core/schema');
 var util = require('util');
-var carbon = require('raintank-core/lib/carbon');
+var carbon = require('./lib/carbon');
+var MetricDefinitions = require("./lib/metricDefinitions");
 var queue = require('raintank-queue');
-var producer = queue.Publisher;
 var cluster = require('cluster');
-var consumer = new queue.Consumer({
-    mgmtUrl: config.queue.mgmtUrl,
-    consumerSocketAddr: config.queue.consumerSocketAddr
-});
-producer.init({
-    publisherSocketAddr: config.queue.publisherSocketAddr,
-    partitions: config.queue.partitions,
-});
 
 var numCPUs = config.numCPUs;
 
 var metricDef = {};
-
+var publisher;
 function init() {
-    console.log("initializing");
-    consumer.on('connect', function() {
-        consumer.join('metrics', 'metricStore');
-        consumer.join('metricDefChange', 'metricStore');
+    console.log("starting metricDefConsumer");
+    var metricDefConsumer = new queue.Consumer({
+        url: config.queue.url,
+        exchangeName: "metrics",  //this should match the name of the exchange the producer is using.
+        exchangeType: "topic", // this should match the exchangeType the producer is using.
+        queueName: '', //leave blank for an auto generated name. recommended when creating an exclusive queue.
+        exclusive: true, //make the queue exclusive.
+        durable: false,
+        autoDelete: true,
+        queuePattern: 'metrics.*', //match metrics.create, metrics.update, metrics.remove
+        retryCount: -1, // keep trying to connect forever.
+        handler: processMetricDefEvent
     });
-
-    consumer.on('message', function (topic, partition, message) {
-        if (topic == "metrics") {
-            message.forEach(function(msg) {
-                processMetric(msg);
-            });
-        } else if (topic == "metricDefChange") {
-            message.forEach(function(msg) {
-                processMetricDefEvent(msg);
-            });
-        }
+    metricDefConsumer.on('error', function(err) {
+        console.log("metricDefConsumer emitted fatal error.")
+        console.log(err);
+        process.exit(1);
     });
-    // every 15minutes, delete any stale metricDefs from the cache.
-    setInterval(function() {
-        var metrics = Object.keys(metricDef);
-        metrics.forEach(function(metricName) {
-            var metric = metricDef[metricName];
-            if (metric.lastUpdate.getTime() < (new Date().getTime() - 900000)) {
-                delete metricDef[metricName];
-            }
-        });
-    }, 900000);
+    console.log("starting metricResultsConsumer");
+    var metricResultsConsumer = new queue.Consumer({
+        url: config.queue.url,
+        exchangeName: "metricResults",  //this should match the name of the exchange the producer is using.
+        exchangeType: "x-consistent-hash", // this should match the exchangeType the producer is using.
+        queueName: '', //leave blank for an auto generated name. recommended when creating an exclusive queue.
+        exclusive: true, //make the queue exclusive.
+        durable: false,
+        autoDelete: true,
+        queuePattern: '10', //
+        retryCount: -1, // keep trying to connect forever.
+        handler: processMetrics
+    });
+    metricResultsConsumer.on('error', function(err) {
+        console.log("metricResultsConsumer emitted fatal error.")
+        console.log(err);
+        process.exit(1);
+    });
+    console.log("initializing metricEvents publisher.");
+    publisher = new queue.Publisher({
+        url: config.queue.url,
+        exchangeName: "metricEvents",
+        exchangeType: "fanout",
+        retryCount: 5,
+        retryDelay: 1000,
+    });
 }
 
 var buffer = {
@@ -56,25 +64,29 @@ var buffer = {
 
 
 function processMetricDefEvent(payload) {
-    if (payload.action == 'update') {
-        updateMetricDef(payload.metric);
-    } else if (payload.action == 'remove') {
-        removeMetricDef(payload.metric);
+    var routingKey = message.fields.routingKey;
+    var action = routingKey.split('.')[1]; //one of update, create, delete.
+    if (action === 'update') {
+        updateMetricDef(JSON.parse(message.content.toString));
+    } else if (action === 'remove') {
+        removeMetricDef(JSON.parse(message.content.toString));
+    } else {
+        console.log("messsage has unknown action. ", action);
     }
 }
 
 function updateMetricDef(metric) {
-    if (!(metric._id in metricDef)) {
+    if (!(metric.id in metricDef)) {
         return;
     }
-    console.log('updating metricDef of %s', metric._id);
-    metric.lastUpdate = new Date(metric.lastUpdate);
-    if (metricDef[metric._id].lastUpdate.getTime() >= metric.lastUpdate.getTime()) {
-        console.log('%s already up to date.', metric._id);
+    console.log('updating metricDef of %s', metric.id);
+    metric.lastUpdate = new Date(metric.lastUpdate).getTime();
+    if (metricDef[metric.id].lastUpdate >= metric.lastUpdate) {
+        console.log('%s already up to date.', metric.id);
         return;
     }
-    if (metric._id in metricDef) {
-        metric.cache = metricDef[metric._id].cache;
+    if (metric.id in metricDef) {
+        metric.cache = metricDef[metric.id].cache;
     } else {
         var now = new Date().getTime()/1000;
         metric.cache = {
@@ -92,72 +104,72 @@ function updateMetricDef(metric) {
             }
         }; 
     }
-    metricDef[metric._id] = metric;
+    metricDef[metric.id] = metric;
 };
 
 function removeMetricDef(metric) {
-    console.log('removing metricDef for %s', metric._id);
-    delete metricDef[metric._id];
+    console.log('removing metricDef for %s', metric.id);
+    delete metricDef[metric.id];
 };
 
-function processMetric(metric) {
-    metric._id = util.format('%s.%s', metric.account, metric.name);
-    //console.log("processing metric %s", metric._id);
-    if (!(metric._id in metricDef)) {
-        getMetricDef(metric, function(err, def) {
-            if (err) {
-                console.log('failed to get metricDef from DB.');
-                console.log(err);
-                return;
-            }
-            console.log('adding metricDef to cache.');
+function processMetrics(message) {
+    var metrics = JSON.parse(message.content.toString());
+    metrics.forEach(function(metric) {
+        metric.id = util.format('%s.%s', metric.account, metric.name);
+        //console.log("processing metric %s", metric.id);
+        if (!(metric.id in metricDef)) {
+            getMetricDef(metric, function(err, def) {
+                if (err) {
+                    console.log('failed to get metricDef from DB.');
+                    console.log(err);
+                    return;
+                }
+                console.log('adding metricDef to cache.', def.id);
 
-            //TDOD: pull metrics from influxdb and populate cache.
-            var now = new Date().getTime()/1000;
-            def.cache = {
-                "raw": {
-                    "data": [], 
-                    "flushTime": now - 600
-                },
-                "aggr": {
-                    "data": {
-                        "avg": [],
-                        "min": [],
-                        "max": []
+                //TDOD: pull metrics from influxdb and populate cache.
+                var now = new Date().getTime()/1000;
+                def.cache = {
+                    "raw": {
+                        "data": [], 
+                        "flushTime": now - 600
                     },
-                    "flushTime": now - 26100
-                }
-            }; 
-             if (!("thresholds" in def)) {
-                def.thresholds = {};
-            }
-            ['warnMin', 'warnMax', 'criticalMin', 'criticalMax'].forEach(function(thresh) {
-                if (!(thresh in def.thresholds)) {
-                    def.thresholds[thresh] = null;
-                }
-            });
-            metricDef[metric._id] = def;
+                    "aggr": {
+                        "data": {
+                            "avg": [],
+                            "min": [],
+                            "max": []
+                        },
+                        "flushTime": now - 26100
+                    }
+                }; 
+                metricDef[metric.id] = def;
 
+                storeMetric(metric);
+            });
+        } else {
             storeMetric(metric);
-        });
-    } else {
-        storeMetric(metric);
-    }
+        }
+    });
 }
 
 function getMetricDef(message, callback) {
-    var filter = {
-        _id: message._id
-    }
-    schema.metrics.model.findOne(filter).lean().exec(function(err, metric) {
+    MetricDefinitions.get(message.id, function(err, metric) {
         if (err) {
             console.log(err);
             return callback(err);
         }
         if (!(metric)) {
             console.log('%s not found. creating it.', message.name);
-            message.lastUpdate = new Date();
-            metric = schema.metrics.model(message);
+            message.lastUpdate = new Date().getTime();
+            if (!("thresholds" in message)) {
+                message.thresholds = {};
+            }
+            ['warnMin', 'warnMax', 'criticalMin', 'criticalMax'].forEach(function(thresh) {
+                if (!(thresh in message.thresholds)) {
+                    message.thresholds[thresh] = null;
+                }
+            });
+            metric = new MetricDefinitions.Model(message);
             return metric.save(callback);
         }
         //TODO: load aggregation stats from backend.
@@ -204,7 +216,7 @@ function flushBuffer() {
 }
 
 function rollupRaw(metric) {
-    var def = metricDef[metric._id];
+    var def = metricDef[metric.id];
     if (def.cache.raw.flushTime < (metric.time - 300)) {
         
         if (def.cache.aggr.flushTime < (metric.time - 21600)) {
@@ -332,7 +344,7 @@ function rollupRaw(metric) {
 }
 
 function checkThresholds(metric) {
-    var def = metricDef[metric._id];
+    var def = metricDef[metric.id];
     var value = metric.value;
     var thresholds = def.thresholds;
 
@@ -367,14 +379,14 @@ function checkThresholds(metric) {
     var events = [];
     var currentState = def.state;
     if (state != def.state) {
-        console.log('state has changed for %s. was %s now %s', def._id, currentState, state);
+        console.log('state has changed for %s. was %s now %s', def.id, currentState, state);
         def.state = state;
-        def.lastUpdate = new Date(metric.time * 1000);
+        def.lastUpdate = new Date(metric.time * 1000).getTime();
         updates = true;
-    } else if ('keepAlives' in def && def.keepAlives && (def.lastUpdate.getTime()/1000) < metric.time - def.keepAlives) {
+    } else if ('keepAlives' in def && def.keepAlives && (def.lastUpdate/1000) < metric.time - def.keepAlives) {
         console.log("no updates in %s seconds. sending keepAlive", def.keepAlives);
         updates = true;
-        def.lastUpdate = new Date(metric.time * 1000);
+        def.lastUpdate = new Date(metric.time * 1000).getTime();
         var checkEvent = {
             source: "metric",
             metric: metric.name,
@@ -389,39 +401,17 @@ function checkThresholds(metric) {
     }
 
     if (updates) {
-        schema.metrics.model.findOne({_id: def._id}).lean().exec(function(err, obj) {
+        def.save(function(err) {
             if (err) {
-                console.log("failed to get metric Object from DB.");
+                console.log('error updating metric definition for %s', def.id)
                 console.log(err);
+                delete metricDef[def.id];
                 return;
             }
-            if (obj.lastUpdate.getTime()/1000 > metric.time) {
-                console.log("MetricDef cache older then DB. %s", obj._id);
-                delete metricDef[metric._id];
-                return;
-            }
-
-            obj.lastUpdate = def.lastUpdate;
-            obj.state = def.state;
-            var id = obj._id;
-            delete obj._id;
-            schema.metrics.model.update({_id: id, lastUpdate: obj.lastUpdate}, obj, function(err, count) {
-                if (err) {
-                    console.log('error updating metric definition for %s', id)
-                    console.log(err);
-                    delete metricDef[id];
-                    return;
-                }
-                if (count < 1) {
-                    console.log('%s definition stale, update ignored and removing from cache.', id);
-                    delete metricDef[id];
-                    return;
-                }
-                console.log("%s update commited to DB.");
-            });
+            console.log("%s update commited to elasticSearch.", def.id);
         });
     }
-    
+
     if (state > 0) {
         var checkEvent = {
             source: "metric",
@@ -451,7 +441,13 @@ function checkThresholds(metric) {
 
     if (events.length > 0 ) {
         var messages = [];
-        producer.send('metricEvents', partition, [events]);
+        events.forEach(function(e) {
+            publisher.publish(e, e.type, function(err) {
+                if (err) {
+                    console.log("failed to publish event.", err);
+                }
+            });
+        });
     }
 }
 
@@ -466,22 +462,9 @@ if (cluster.isMaster) {
         cluster.fork();
     }
     cluster.on('exit', function(worker, code, signal) {
-        console.log('worker ' + worker.process.pid + ' died');
-        cluster.fork();
+        console.log('worker ' + worker.process.pid + ' died. Restarting....');
+        //cluster.fork();
     });
-
-    // every 60minutes, delete any expired (2days) metric from the DB.
-    setInterval(function() {
-        var filter = {
-            lastUpdate: {$lt: new Date(new Date().getTime() - 172800000)},
-        }
-        schema.metrics.model.remove(filter).exec(function(err) {
-            if (err) {
-                console.log("Error deleting expired metrics.");
-                console.log(err);
-            }
-        });
-    }, 3600000);
 } else {
     init();
 }
