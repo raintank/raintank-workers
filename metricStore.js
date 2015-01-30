@@ -217,7 +217,7 @@ function flushBuffer() {
 
 function rollupRaw(metric) {
     var def = metricDef[metric.id];
-    if (def.cache.raw.flushTime < (metric.time - 300)) {
+    if (def.cache.raw.flushTime < (metric.time - 600)) {
         
         if (def.cache.aggr.flushTime < (metric.time - 21600)) {
             var min, max, avg, sum;
@@ -303,7 +303,7 @@ function rollupRaw(metric) {
         if (avg !== null && isNaN(avg) != true) {
             buffer.metrics.push(
                 util.format(
-                    '5m.avg.%s.%s %s %s',
+                    '10m.avg.%s.%s %s %s',
                     metric.account,
                     metric.name, 
                     avg,
@@ -314,7 +314,7 @@ function rollupRaw(metric) {
         if (max !== null && isNaN(max) != true) {
             buffer.metrics.push(
                 util.format(
-                    '5m.max.%s.%s %s %s',
+                    '10m.max.%s.%s %s %s',
                     metric.account,
                     metric.name, 
                     max,
@@ -325,7 +325,7 @@ function rollupRaw(metric) {
         if (min !== null && isNaN(min) != true) {
             buffer.metrics.push(
                 util.format(
-                    '5m.min.%s.%s %s %s',
+                    '10m.min.%s.%s %s %s',
                     metric.account,
                     metric.name, 
                     min,
