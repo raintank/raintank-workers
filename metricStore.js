@@ -458,6 +458,7 @@ process.on( "SIGINT", function() {
 
 if (cluster.isMaster) {
     // Fork workers.
+    initElasticsearch();
     for (var i = 0; i < numCPUs; i++) {
         cluster.fork();
     }
@@ -467,4 +468,49 @@ if (cluster.isMaster) {
     });
 } else {
     init();
+}
+
+
+function initElasticsearch() {
+    var client = MetricDefinitions.getClient();
+    client.indices.exists({
+        index: "definitions"
+    }, function(err, exists) {
+        if (err) {
+            console.log("index exists error: ", err);
+            process.exit(1);
+        }
+        if (exists) {
+            client.indices.putMapping({
+                index: "definitions",
+                type: "metric",
+                body: {
+                    metric: {
+                        properties: {
+                            name: {type: "string", "index": "not_analyzed"}
+                        }
+                    }
+                }
+            });
+        } else {
+            client.indices.create({
+                index: "definitions",
+                body: {
+                    mappings: {
+                        metric: {
+                            properties: {
+                                name: {type: "string", "index": "not_analyzed"}
+                            }
+                        }
+                    }
+                }
+            }, function(err) {
+                if (err) {
+                    console.log("failed to create definitions index.", err);
+                    process.exit(1);
+                }
+                
+            });
+        }
+    });
 }
