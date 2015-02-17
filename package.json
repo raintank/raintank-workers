@@ -12,6 +12,7 @@
     "elasticsearch": "*",
     "generic-pool": "*",
     "tv4": "*",
-    "socket.io": "*"
+    "socket.io": "*",
+    "redis": "*"
   }
 }

@@ -245,7 +245,7 @@ function rollupRaw(metric) {
             def.cache.aggr.data.min = [];
             def.cache.aggr.flushTime = metric.time;
             if (avg !== null && isNaN(avg) != true) {
-                console.log("writing 6hour rollup for %s", metric._id);
+                console.log("writing 6hour rollup for %s", metric.id);
                 buffer.metrics.push(
                     util.format(
                         '6hour.avg.%s.%s %s %s',
@@ -301,6 +301,7 @@ function rollupRaw(metric) {
         def.cache.raw.data = [];
         def.cache.raw.flushTime = metric.time
         if (avg !== null && isNaN(avg) != true) {
+            console.log("writing 10min rollup for %s:%s", metric.id, avg);
             buffer.metrics.push(
                 util.format(
                     '10m.avg.%s.%s %s %s',
