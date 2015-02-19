@@ -1,37 +1,36 @@
 'use strict';
 var config = require('./config').config;
-var schema = require('raintank-core/schema');
 var util = require('util');
 var queue = require('raintank-queue');
-var consumer = new queue.Consumer({
-    mgmtUrl: config.queue.mgmtUrl,
-    consumerSocketAddr: config.queue.consumerSocketAddr
-});
 var cluster = require('cluster');
+var EventDefinitions = require("./lib/eventDefinitions");
 
 var numCPUs = config.numCPUs;
-
-var running = false;
 var client;
 function init() {
     console.log("initializing");
-    consumer.on('connect', function() {
-        consumer.join('serviceEvents', 'eventWorker');
-        consumer.join('metricEvents', 'eventWorker');
+    var eventConsumer = new queue.Consumer({
+        url: config.queue.url,
+        exchangeName: "grafana_events",  //this should match the name of the exchange the producer is using.
+        exchangeType: "topic", // this should match the exchangeType the producer is using.
+        queueName: '', //leave blank for an auto generated name. recommended when creating an exclusive queue.
+        exclusive: true, //make the queue exclusive.
+        durable: false,
+        autoDelete: true,
+        queuePattern: 'EVENT.#', //match all EVENTS
+        retryCount: -1, // keep trying to connect forever.
+        handler: processEvent
     });
-
-    consumer.on('message', function (topic, partition, message) {
-        if (topic == "serviceEvents") {
-            serviceEvent(message);
-        } else if (topic == "metricEvents") {
-            metricEvent(message);
-        }
+    eventConsumer.on('error', function(err) {
+        console.log("eventConsumer emitted fatal error.")
+        console.log(err);
+        process.exit(1);
     });
 }
 
-function serviceEvent(serviceEvent) {
-    console.log('processing serviceEvent.');
-    var obj = new schema.serviceEvents.model(serviceEvent);
+function processEvent(message) {
+    var event = JSON.parse(message.content.toString());
+    var obj = new EventDefinitions.Model(event);
     obj.save(function(err) {
         if (err) {
             console.log('failed to save serviceEvent.');
@@ -39,33 +38,9 @@ function serviceEvent(serviceEvent) {
             return;
         }
         console.log(obj);
-        console.log('serviceEvent saved.');
+        console.log('Event saved.');
     });
-    //TODO: handle Actions via ElasticSearch Percolate.
 };
-
-function metricEvent(metricEvent) {
-    if (metricEvent.type == 'keepAlive') {
-        //ignore keepalives that are older then 2minute2.
-        if (metricEvent.timestamp > (new Date().getTime() - 120000)) {
-            console.log('keepAlive recieved for: %s.%s', metricEvent.account, metricEvent.metric);
-        }
-        return;
-    }
-    console.log('processing metricEvent.');
-    var obj = new schema.metricEvents.model(metricEvent);
-    obj.save(function(err) {
-        if (err) {
-            console.log('failed to save metricEvent.');
-            console.log(err);
-            return;
-        }
-        console.log(obj);
-        console.log('metricEvent saved.');
-    });
-    //TODO: handle Actions via ElasticSearch Percolate.
-};
-
 
 process.on( "SIGINT", function() {
     console.log('CLOSING [SIGINT]');

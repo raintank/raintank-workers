@@ -63,13 +63,13 @@ var buffer = {
 }
 
 
-function processMetricDefEvent(payload) {
+function processMetricDefEvent(message) {
     var routingKey = message.fields.routingKey;
     var action = routingKey.split('.')[1]; //one of update, create, delete.
     if (action === 'update') {
-        updateMetricDef(JSON.parse(message.content.toString));
+        updateMetricDef(JSON.parse(message.content.toString()));
     } else if (action === 'remove') {
-        removeMetricDef(JSON.parse(message.content.toString));
+        removeMetricDef(JSON.parse(message.content.toString()));
     } else {
         console.log("messsage has unknown action. ", action);
     }

@@ -13,6 +13,7 @@
     "generic-pool": "*",
     "tv4": "*",
     "socket.io": "*",
-    "redis": "*"
+    "redis": "*",
+    "node-uuid": "*"
   }
 }
