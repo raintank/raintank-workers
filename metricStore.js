@@ -115,7 +115,7 @@ function removeMetricDef(metric) {
 function processMetrics(message) {
     var metrics = JSON.parse(message.content.toString());
     metrics.forEach(function(metric) {
-        metric.id = util.format('%s.%s', metric.account, metric.name);
+        metric.id = util.format('%s.%s', metric.org_id, metric.name);
         //console.log("processing metric %s", metric.id);
         if (!(metric.id in metricDef)) {
             getMetricDef(metric, function(err, def) {
@@ -182,7 +182,7 @@ function storeMetric(metric) {
         buffer.metrics.push(
             util.format(
                 '%s.%s %s %s',
-                metric.account,
+                metric.org_id,
                 metric.name, 
                 metric.value,
                 Math.floor(metric.time)
@@ -249,7 +249,7 @@ function rollupRaw(metric) {
                 buffer.metrics.push(
                     util.format(
                         '6hour.avg.%s.%s %s %s',
-                        metric.account,
+                        metric.org_id,
                         metric.name, 
                         avg,
                         Math.floor(metric.time)
@@ -260,7 +260,7 @@ function rollupRaw(metric) {
                 buffer.metrics.push(
                     util.format(
                         '6hour.max.%s.%s %s %s',
-                        metric.account,
+                        metric.org_id,
                         metric.name, 
                         max,
                         Math.floor(metric.time)
@@ -271,7 +271,7 @@ function rollupRaw(metric) {
                 buffer.metrics.push(
                     util.format(
                         '6hour.min.%s.%s %s %s',
-                        metric.account,
+                        metric.org_id,
                         metric.name, 
                         min,
                         Math.floor(metric.time)
@@ -305,7 +305,7 @@ function rollupRaw(metric) {
             buffer.metrics.push(
                 util.format(
                     '10m.avg.%s.%s %s %s',
-                    metric.account,
+                    metric.org_id,
                     metric.name, 
                     avg,
                     Math.floor(metric.time)
@@ -316,7 +316,7 @@ function rollupRaw(metric) {
             buffer.metrics.push(
                 util.format(
                     '10m.max.%s.%s %s %s',
-                    metric.account,
+                    metric.org_id,
                     metric.name, 
                     max,
                     Math.floor(metric.time)
@@ -327,7 +327,7 @@ function rollupRaw(metric) {
             buffer.metrics.push(
                 util.format(
                     '10m.min.%s.%s %s %s',
-                    metric.account,
+                    metric.org_id,
                     metric.name, 
                     min,
                     Math.floor(metric.time)
@@ -391,7 +391,7 @@ function checkThresholds(metric) {
         var checkEvent = {
             source: "metric",
             metric: metric.name,
-            account: metric.account,
+            account: metric.org_id,
             parent: def.parent,
             type: 'keepAlive',
             state: levelMap[state],
@@ -417,7 +417,7 @@ function checkThresholds(metric) {
         var checkEvent = {
             source: "metric",
             metric: metric.name,
-            account: metric.account,
+            account: metric.org_id,
             parent: def.parent,
             type: 'checkFailure',
             state: levelMap[state],
@@ -430,7 +430,7 @@ function checkThresholds(metric) {
         var metricEvent = {
             source: "metric",
             metric: metric.name,
-            account: metric.account,
+            account: metric.org_id,
             parent: def.parent,
             type: 'stateChange',
             state: levelMap[state],
